@@ -127,7 +127,11 @@ impl<'a> RoseEngine<'a> {
     /// anchored/eod-literal/long-lit/NFA-очередей. Всё прочее — fail-fast
     /// `NeedsFullRose` (не молчаливый неверный результат).
     pub fn parse(bc: &'a [u8]) -> Result<Self, RoseError> {
-        let need = re::TOTAL_NUM_LITERALS + 4;
+        // vuln-scan F-101: read_header декодирует поля вплоть до OUTFIX_END_QUEUE
+        // (оффсет 400, чтение 400..404), поэтому гвард обязан покрывать 404, а не
+        // TOTAL_NUM_LITERALS+4 (=392) — иначе bc длиной 392..=403 проходит проверку
+        // и паникует на slice-index в read_header (враждебная CRC-валидная БД).
+        let need = re::OUTFIX_END_QUEUE + 4;
         if bc.len() < need {
             return Err(RoseError::Truncated);
         }
@@ -163,7 +167,11 @@ impl<'a> RoseEngine<'a> {
     /// anchored/eod-matcher/long-lit/delay/eod-программы. Матчи приходят из
     /// floating-таблицы И/ИЛИ из outfix-NFA (см. [`RoseEngine::outfix_nfas`]).
     pub fn parse_allow_nfa(bc: &'a [u8]) -> Result<Self, RoseError> {
-        let need = re::TOTAL_NUM_LITERALS + 4;
+        // vuln-scan F-101: read_header декодирует поля вплоть до OUTFIX_END_QUEUE
+        // (оффсет 400, чтение 400..404), поэтому гвард обязан покрывать 404, а не
+        // TOTAL_NUM_LITERALS+4 (=392) — иначе bc длиной 392..=403 проходит проверку
+        // и паникует на slice-index в read_header (враждебная CRC-валидная БД).
+        let need = re::OUTFIX_END_QUEUE + 4;
         if bc.len() < need {
             return Err(RoseError::Truncated);
         }

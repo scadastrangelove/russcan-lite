@@ -62,6 +62,21 @@ fn hostile_table_size_rejected() {
     );
 }
 
+/// vuln-scan F-101: `RoseEngine::parse` декодирует заголовок вплоть до оффсета
+/// 404 (OUTFIX_END_QUEUE+4), но раньше гвардил лишь на 392 (TOTAL_NUM_LITERALS+4).
+/// Байткод длиной 392..=403 проходил гвард и паниковал на slice-index в
+/// `read_header`. Теперь обязан вернуть Err без паники (враждебная CRC-валидная БД).
+#[test]
+fn hostile_rose_header_length_gap_rejected() {
+    for len in 392..=403usize {
+        let bc = vec![0u8; len];
+        assert!(
+            RoseEngine::parse(&bc).is_err(),
+            "bc len={len} (окно 392..=403) должен отклоняться на parse, а не паниковать"
+        );
+    }
+}
+
 /// tiny-buffer safety: скан буферов длиной 0..=40 не паникует и не underflow'ит.
 /// Пинит границы FDR-зон (`create_short/start/end_zone`): `start = z_end -
 /// ITER_BYTES` не уходит в underflow (start = copy_len ≥ 1), а unsafe-загрузки
