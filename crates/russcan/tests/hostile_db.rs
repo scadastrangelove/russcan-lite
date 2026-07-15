@@ -4,9 +4,11 @@
 //! Закрывает vuln-scan F-001/002/004/009 (см. TRIAGE.md). Оракул не нужен —
 //! используем запиненную FDR-БД из fixtures.
 
+use russcan::Database;
 use russcan_bytecode::rose::RoseEngine;
 use russcan_bytecode::SerializedDb;
 use russcan_hwlm::fdr::FdrTable;
+use russcan_hwlm::ScanCtl;
 
 /// Извлекает байты floating FDR-таблицы из сериализованной БД (тот же путь, что
 /// `Database::load`).
@@ -58,4 +60,25 @@ fn hostile_table_size_rejected() {
         FdrTable::parse(&table).is_err(),
         "size > buffer должен отклоняться (Truncated)"
     );
+}
+
+/// tiny-buffer safety: скан буферов длиной 0..=40 не паникует и не underflow'ит.
+/// Пинит границы FDR-зон (`create_short/start/end_zone`): `start = z_end -
+/// ITER_BYTES` не уходит в underflow (start = copy_len ≥ 1), а unsafe-загрузки
+/// зоны ограничены гвардом `it + ITER_BYTES <= z.end` внутри 64-байтного
+/// `copied`-буфера. overflow-checks в test-сборке превращают любой
+/// wrapping_sub-underflow в панику → падение теста. Закрывает автономную
+/// гипотезу rust-in-peace («z.start < 8 на малых телах → OOB») как R1-FP:
+/// unsafe-чтение доминируется проверенным инвариантом.
+#[test]
+fn tiny_buffers_scan_without_panic() {
+    let db = Database::load(REAL_DB).expect("load realpack db");
+    // 0..=40 покрывает short-зону (len ≤ 16), start/end-границы и первую main-зону.
+    for len in 0usize..=40 {
+        for &b in &[0x00u8, b'a', 0xff] {
+            let data = vec![b; len];
+            db.scan_block(&data, &mut |_, _| ScanCtl::Continue)
+                .unwrap_or_else(|e| panic!("len={len} byte={b:#x}: scan_block Err {e}"));
+        }
+    }
 }
