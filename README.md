@@ -36,8 +36,8 @@ compile to — **OWASP CRS v4** (`@rx`), **Suricata ET Open 7.0.3** (~7k PCRE pl
 ~50k `content` literals), and a production WAAP signature pack — and shipped the
 engines that carry the *typical* signature, not the exotic tail. The production
 pack, it turns out, compiles to an almost-pure-literal Rose program
-(`CHECK_MED_LIT` + `REPORT` are ~99% of the instructions). So that is what this
-repo is.
+(`CHECK_MED_LIT_NOCASE` + `REPORT` + `END`/`FINAL_REPORT`/`DEDUPE` are ~99% of the
+instructions). So that is what this repo is.
 
 **IN — the literal fast path (block mode, floating):**
 
@@ -173,8 +173,15 @@ guard of its own.
 ## Performance
 
 Detection-specific workloads — real WAF-body scanning, not microbenchmarks.
-Ratio is **russcan-lite ÷ release Vectorscan** (higher = russcan faster), 3×
-median on a shared box.
+Ratio is **literal-engine ÷ release Vectorscan** (higher = the Rust engine is
+faster), 3× median on a shared box.
+
+> Measured on the **full port's** literal scan path, not re-run in this repo: the
+> bench bodies (`body256k`, `dense`, …) aren't shipped here, and the literal
+> engine in russcan-lite is copied byte-identical from that port — the 8 golden
+> fixtures above verify the copy produces identical output. The numbers transfer
+> because the code is the same; they were not independently benchmarked on this
+> checkout. Latest run 2026-07-15 (post-hardening), vs Release-Vectorscan.
 
 | body | ratio | what it stresses |
 |---|---:|---|
@@ -183,12 +190,12 @@ median on a shared box.
 | body256k (realistic) | ~1.10× | realistic WAF request body |
 | dense (match-saturated) | ~1.09× | adversarial, match-heavy |
 
-The single workload we lose is `clean` — a synthetic worst case engineered to
-make us lose (all prefilter, no matches; against LLVM-built C the gap is <2%). On
-the two bodies that resemble production traffic, the memory-safe engine is the
-faster one. This surprises people. It stopped surprising us somewhere around the
-fourth optimisation stage — the full journey from 0.53× to parity-with-a-win is
-documented in the full port's `PERF_METHODOLOGY.md`.
+The single workload it loses is `clean` — a synthetic worst case engineered to
+lose (all prefilter, no matches; against LLVM-built C the gap is <2%). On the two
+bodies that resemble production traffic, the memory-safe engine is the faster
+one. This surprises people. It stopped surprising the port's authors somewhere
+around the fourth optimisation stage — the full 0.53× → parity-with-a-win journey
+is documented in the full port's `PERF_METHODOLOGY.md`.
 
 ## Contact
 
