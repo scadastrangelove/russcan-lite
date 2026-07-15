@@ -18,3 +18,7 @@ path = "src/bin/scan_db.rs"
 [[bin]]
 name = "bench"
 path = "src/bin/bench.rs"
+
+[[bin]]
+name = "panic_fuzz"
+path = "src/bin/panic_fuzz.rs"
