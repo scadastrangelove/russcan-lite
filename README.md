@@ -26,12 +26,14 @@ The literal floating path, block mode:
 ## Scope — what's OUT (lives only in the full port)
 
 - **`russcan-nfa`** — the Ф3 regex research track (LimEx / McClellan / Sheng /
-  Castle / LBR). Not needed for literal matching.
-- **Leftfix / prefix** opcodes (`CHECK_PREFIX` → NFA) — feature-gated OFF in the
-  lite build (pure-literal programs never emit them). This is the one coupling
-  to resolve during extraction: `russcan-rose` currently pulls `russcan-nfa` for
-  leftfix; the lite build gates that behind a `leftfix` cargo feature so the
-  literal path builds with no NFA dependency.
+  Castle / LBR). Not needed for literal matching. In this repo it is replaced by
+  a ~40-line **stub crate** (`crates/russcan-nfa`) so the literal interpreter
+  compiles byte-for-byte unchanged: its constructors return `Unsupported`, so a
+  non-literal DB fails with a clean error instead of pulling in the whole engine.
+- **Leftfix / prefix / infix** opcodes (`CHECK_PREFIX` / `CHECK_INFIX` → NFA) —
+  never emitted by a pure-literal Rose program, so they are never reached. The
+  stub keeps `russcan-rose` identical to the full port (zero source divergence),
+  which is what lets changes flow full → lite by copy rather than by re-patching.
 - `oracle` (libhs FFI diff-test shim), `tools/`, `census/`, `fuzz/`,
   `mvp-ffi-baseline/` — dev/research scaffolding.
 - Streaming, anchored, and non-FDR floating matchers — out of scope by design.
@@ -51,9 +53,23 @@ subset of it. Changes flow full → lite.
 
 ## Status
 
-Repo initialized (scaffold). Next: extract the five literal-path crates from the
-full port with the `leftfix` feature gate, wire the minimal workspace, and carry
-over the literal diff-tests (bit-exact vs the C oracle) as the acceptance gate.
+**Working.** The six-crate workspace (five literal-path crates + the NFA stub)
+builds clean on stable Rust (`cargo build`, dev + release, no warnings) with zero
+C dependency. `cargo test` is green, and the literal diff-harness (`scan_db`)
+reproduces the C oracle's golden output **byte-for-byte on all 8 fixtures**
+(`basic`, `fdr400`, `fdrlit`, `realpack`, `t3_len7`, `t4_long`, `u1_len1`,
+`u2_len12`) — the acceptance gate for the extraction.
+
+```
+cargo build --release
+cargo test
+# end-to-end vs golden:
+target/release/scan_db <db> <corpus_hex> <out>   # matches the C oracle exactly
+```
+
+The hostile-DB regression tests (`crates/russcan/tests/hostile_db.rs`) also carry
+over: a CRC-valid but confirm-corrupted DB is rejected at parse time, not read
+out of bounds in the hot path.
 
 ## License / provenance
 

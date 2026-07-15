@@ -1,5 +1,4 @@
 /target
-Cargo.lock
 **/*.rs.bk
 *.tkn
 .rip-auth

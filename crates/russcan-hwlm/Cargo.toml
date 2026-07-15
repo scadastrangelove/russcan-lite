@@ -1,0 +1,22 @@
+[package]
+name = "russcan-hwlm"
+description = "Литеральные матчеры: noodle, FDR, Teddy (Ф2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+russcan-simd.workspace = true
+russcan-bytecode.workspace = true
+memchr.workspace = true
+
+[features]
+# Диагностический контроль (не production): fused confirm внутри scan-цикла FDR
+# (немедленный do_confirm, без candidate-буфера). Изолирует staging-cost.
+fused_confirm = []
+# Диагностика: дамп кандидатов + confirm-replay (scan исключён) для сравнения
+# Rust confirm-пути с Clang-C по insns/cycles/IPC на кандидата.
+confirm_replay = []
+
+[dev-dependencies]

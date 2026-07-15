@@ -1,0 +1,10 @@
+[package]
+name = "russcan-nfa"
+description = "russcan-lite stub — the full NFA/regex (Ф3) engine is out of scope"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"

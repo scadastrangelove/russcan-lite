@@ -1,0 +1,9 @@
+[package]
+name = "russcan-simd"
+description = "SIMD-слой: порт SuperVector + accel-примитивы (verm/shufti/truffle)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

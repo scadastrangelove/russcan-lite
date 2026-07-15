@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/russcan-simd",
+    "crates/russcan-bytecode",
+    "crates/russcan-hwlm",
+    "crates/russcan-nfa",
+    "crates/russcan-rose",
+    "crates/russcan",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.86"
+license = "BSD-3-Clause"
+repository = "https://github.com/scadastrangelove/russcan-lite"
+
+[workspace.dependencies]
+russcan-simd = { path = "crates/russcan-simd" }
+russcan-bytecode = { path = "crates/russcan-bytecode" }
+russcan-hwlm = { path = "crates/russcan-hwlm" }
+russcan-nfa = { path = "crates/russcan-nfa" }
+russcan-rose = { path = "crates/russcan-rose" }
+memchr = "2.7"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

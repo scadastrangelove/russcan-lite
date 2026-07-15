@@ -1,0 +1,13 @@
+[package]
+name = "russcan-rose"
+description = "Rose-интерпретатор, scratch, оркестровка (Ф4)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+russcan-simd.workspace = true
+russcan-bytecode.workspace = true
+russcan-hwlm.workspace = true
+russcan-nfa.workspace = true
