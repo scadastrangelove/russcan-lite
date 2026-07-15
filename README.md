@@ -1,77 +1,139 @@
 # russcan-lite
 
-**The lean literal-matcher build of [russcan](../russcan).** A block-mode,
-pure-literal multi-pattern scanner — FDR + Teddy + confirm + the Rose literal
-interpreter — with **zero C dependency**. This is the deployable engine
-(the piece meant to replace `libhs.so` in the WAAP data plane), kept in its own
-repo so it isn't confused with the full Vectorscan→Rust research port.
+*A Rust port of a C++ port of a research regex engine, trimmed to the parts a
+firewall actually runs on every request. It's ports all the way down.*
 
-> Compilation of patterns stays with upstream C `vectorscan` (offline). This
-> engine only **loads** a serialized DB and scans — no C code in the data plane.
+**russcan-lite is the deployable literal-matching engine of the russcan port** —
+a from-scratch Rust re-implementation of the
+[Vectorscan](https://github.com/VectorCamp/vectorscan)/Hyperscan runtime,
+specialised for **security matching**: the hot path of a WAF or IDS. Block mode,
+floating literals, FDR + Teddy + confirm + the Rose literal interpreter, and
+**no C anywhere in the data plane.**
 
-## Scope — what's IN
+> Pattern *compilation* stays upstream, in C `vectorscan`, offline — where a slow
+> bug is merely a slow build. This crate only **loads** a serialized database and
+> scans. The part that runs on every byte of every request is the part we rewrote.
 
-The literal floating path, block mode:
+## Why port a perfectly good C++ engine?
+
+Because it is a perfectly good C++ engine.
+
+A WAF exists so that hostile input never reaches a memory-unsafe parser. It is
+therefore mildly awkward that the memory-unsafe parser is, traditionally, the
+WAF: a C/C++ pattern matcher, in the hot path, on every byte of every request,
+deciding whether the *next* thing is allowed to be dangerous.
+
+The objection is not speed. C/C++ is not slow, and — see the table at the bottom
+— neither are we; on realistic traffic the memory-safe engine is the faster one.
+The objection is running a security control on "fast and *probably* correct."
+russcan-lite moves the scanner into a language where the class of bug we worry
+about most tends to show up as a compile error instead of a CVE.
+
+## Scope — the engines a firewall actually uses
+
+We did not port all of Hyperscan. We took a census of what real rulesets actually
+compile to — **OWASP CRS v4** (`@rx`), **Suricata ET Open 7.0.3** (~7k PCRE plus
+~50k `content` literals), and a production WAAP signature pack — and shipped the
+engines that carry the *typical* signature, not the exotic tail. The production
+pack, it turns out, compiles to an almost-pure-literal Rose program
+(`CHECK_MED_LIT` + `REPORT` are ~99% of the instructions). So that is what this
+repo is.
+
+**IN — the literal fast path (block mode, floating):**
 
 - `russcan-simd` — the `V128` SIMD abstraction (SSSE3 / NEON / scalar backends).
 - `russcan-bytecode` — serialized-DB reader + `RoseEngine` accessor (CRC-checked).
-- `russcan-hwlm` — FDR + Teddy + noodle literal matchers, confirm path (with the
-  parse-time confirm-region validation hardening).
-- `russcan-rose` — the pure-literal `roseRunProgram_l` interpreter
-  (CHECK_BYTE / CHECK_MED_LIT / REPORT / DEDUPE / INCLUDED_JUMP / PUSH_DELAYED),
-  with fallible operand reads + an instruction budget.
+- `russcan-hwlm` — FDR + Teddy + noodle multi-literal matchers + the confirm path
+  (with parse-time confirm-region validation — see *Security*).
+- `russcan-rose` — the pure-**literal** `roseRunProgram_l` interpreter
+  (`CHECK_BYTE` / `CHECK_MED_LIT` / `REPORT` / `DEDUPE` / `INCLUDED_JUMP` /
+  `PUSH_DELAYED`), with fallible operand reads and an instruction budget.
 - `russcan` — the `Database::load` + `scan_block` facade (FDR/Teddy dispatch,
   delayed-literal replay).
 
-## Scope — what's OUT (lives only in the full port)
+**OUT — lives only in the full russcan port:**
 
-- **`russcan-nfa`** — the Ф3 regex research track (LimEx / McClellan / Sheng /
-  Castle / LBR). Not needed for literal matching. In this repo it is replaced by
-  a ~40-line **stub crate** (`crates/russcan-nfa`) so the literal interpreter
-  compiles byte-for-byte unchanged: its constructors return `Unsupported`, so a
-  non-literal DB fails with a clean error instead of pulling in the whole engine.
-- **Leftfix / prefix / infix** opcodes (`CHECK_PREFIX` / `CHECK_INFIX` → NFA) —
-  never emitted by a pure-literal Rose program, so they are never reached. The
-  stub keeps `russcan-rose` identical to the full port (zero source divergence),
-  which is what lets changes flow full → lite by copy rather than by re-patching.
-- `oracle` (libhs FFI diff-test shim), `tools/`, `census/`, `fuzz/`,
-  `mvp-ffi-baseline/` — dev/research scaffolding.
-- Streaming, anchored, and non-FDR floating matchers — out of scope by design.
-
-## Relation to the full port
-
-| | full [`russcan`](../russcan) | `russcan-lite` (this repo) |
-|---|---|---|
-| purpose | complete Vectorscan→Rust port (research) | deployable literal engine |
-| crates | + `russcan-nfa`, `oracle`, tools, census | literal path only |
-| regex/NFA | yes (Ф3) | no |
-| C dependency | oracle (test-only) | **none** |
-| target | parity with all of hs | replace `libhs.so` in the WAAP data plane |
+- The **Ф3 regex/NFA track** — LimEx / McClellan / Sheng / Castle / LBR. Real, but
+  it is what the heavy CRS `@rx` patterns need, not the literal-dominated fast
+  path this engine is for. In this repo `russcan-nfa` is a ~40-line **stub**: the
+  literal interpreter compiles byte-for-byte unchanged, and a non-literal database
+  is rejected with a clean `Unsupported` error instead of dragging in an engine we
+  don't ship.
+- **Gough, Tamarama, smallwrite** — never emitted once across CRS + Suricata + the
+  production pack, so never ported (and asserted-out in the reader).
+- Streaming, anchored matchers, the `libhs` FFI diff-oracle, `tools/`, `census/`,
+  `fuzz/` — dev and research scaffolding.
 
 The full port is the source of truth; russcan-lite is a curated, dependency-lean
-subset of it. Changes flow full → lite.
+subset. Changes flow full → lite by copy, which is precisely why the NFA stub
+keeps `russcan-rose` textually identical rather than forked.
 
-## Status
+## Correctness
 
-**Working.** The six-crate workspace (five literal-path crates + the NFA stub)
-builds clean on stable Rust (`cargo build`, dev + release, no warnings) with zero
-C dependency. `cargo test` is green, and the literal diff-harness (`scan_db`)
-reproduces the C oracle's golden output **byte-for-byte on all 8 fixtures**
-(`basic`, `fdr400`, `fdrlit`, `realpack`, `t3_len7`, `t4_long`, `u1_len1`,
-`u2_len12`) — the acceptance gate for the extraction.
+Byte-for-byte, or it doesn't count.
+
+- `cargo build` (dev + release) — clean, no warnings, stable Rust 1.86, zero C
+  dependency; `cargo test` green.
+- The `scan_db` diff-harness reproduces the C oracle's golden output
+  **byte-for-byte on all 8 fixtures** (`basic`, `fdr400`, `fdrlit`, `realpack`,
+  `t3_len7`, `t4_long`, `u1_len1`, `u2_len12`) — the acceptance gate.
 
 ```
 cargo build --release
 cargo test
-# end-to-end vs golden:
-target/release/scan_db <db> <corpus_hex> <out>   # matches the C oracle exactly
+target/release/scan_db <db> <corpus_hex> <out>   # == the C oracle, exactly
 ```
 
-The hostile-DB regression tests (`crates/russcan/tests/hostile_db.rs`) also carry
-over: a CRC-valid but confirm-corrupted DB is rejected at parse time, not read
-out of bounds in the hot path.
+## Security — the gravity of a rewrite
+
+Rewriting a security scanner in Rust does not delete its vulnerabilities. It
+trades a *known* class of bugs — theirs, two decades catalogued — for an
+*unknown* class: ours, written last week. Every new codebase has its own gravity,
+and every rewrite is another black hole with its own event horizon of fresh CVEs
+— a New Hop where you were promised A New Hope.
+
+So russcan-lite is audited by its sibling,
+**[rust-in-peace](https://github.com/scadastrangelove/rust-in-peace)** — a
+Rust-security fork of Anthropic's defending-code reference harness (Miri UB /
+sanitizer / panic / hang detectors). The literal engine went through its full
+cycle: the memory-safety cluster is closed, and a **CRC-valid but hostile
+database is rejected at parse time**, not read out of bounds in the hot path
+(`crates/russcan/tests/hostile_db.rs` pins this). Integrity is not bounds
+validation — a signature proves the bytes are intact, never that the offsets
+inside them point where they claim. The scanner that guards your parsers gets a
+guard of its own.
+
+## Performance
+
+Detection-specific workloads — real WAF-body scanning, not microbenchmarks.
+Ratio is **russcan-lite ÷ release Vectorscan** (higher = russcan faster), 3×
+median on a shared box.
+
+| body | ratio | what it stresses |
+|---|---:|---|
+| clean (FP-saturated) | 0.88× | confirm-heavy worst case — many FDR candidates, zero literal matches |
+| random | 1.01× | scan-heavy, parity |
+| body256k (realistic) | ~1.10× | realistic WAF request body |
+| dense (match-saturated) | ~1.09× | adversarial, match-heavy |
+
+The single workload we lose is `clean` — a synthetic worst case engineered to
+make us lose (all prefilter, no matches; against LLVM-built C the gap is <2%). On
+the two bodies that resemble production traffic, the memory-safe engine is the
+faster one. This surprises people. It stopped surprising us somewhere around the
+fourth optimisation stage — the full journey from 0.53× to parity-with-a-win is
+documented in the full port's `PERF_METHODOLOGY.md`.
+
+## Contact
+
+**Sergey Gordeychik**
+
+- Email: [scadastrangelove@gmail.com](mailto:scadastrangelove@gmail.com)
+- X/Twitter: [@scadasl](https://x.com/scadasl)
+- Blog: [scadastrangelove.blogspot.com](https://scadastrangelove.blogspot.com/)
 
 ## License / provenance
 
-Derived from the russcan port (which ports upstream `vectorscan`, Apache-2.0 /
-BSD). See the full port for pinned-upstream provenance (`a1c107e`, 5.4.12).
+Derived from the russcan port, which ports upstream
+[`vectorscan`](https://github.com/VectorCamp/vectorscan) (pinned `a1c107e`,
+5.4.12; Apache-2.0 / BSD-3-Clause). See the full port for pinned-upstream
+provenance.
