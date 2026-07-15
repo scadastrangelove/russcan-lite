@@ -21,6 +21,8 @@ fn fdr_table_bytes(db: &[u8]) -> Vec<u8> {
 }
 
 const REAL_DB: &[u8] = include_bytes!("fixtures/realpack.db");
+/// Teddy-движок (engineID 18, 4 маски) — для Teddy-ветки confirm-валидации.
+const TEDDY_DB: &[u8] = include_bytes!("fixtures/t4_long.db");
 
 #[test]
 fn valid_fdr_table_parses() {
@@ -59,6 +61,26 @@ fn hostile_table_size_rejected() {
     assert!(
         FdrTable::parse(&table).is_err(),
         "size > buffer должен отклоняться (Truncated)"
+    );
+}
+
+/// vuln-scan F-005 (Teddy-ветка): `TeddyTable::parse` имеет СВОЙ `validate_confirm`
+/// (teddy.rs:45), отдельный от FDR-версии. FDR-тест выше его не покрывает — этот
+/// закрывает пробел: враждебный confirm-оффсет в Teddy-таблице должен отклоняться
+/// на разборе, а не давать OOB в hot-path. conf_offset = u32 @ 16 (как в FDR).
+#[test]
+fn hostile_teddy_confirm_offset_rejected() {
+    use russcan_hwlm::teddy::TeddyTable;
+    let mut table = fdr_table_bytes(TEDDY_DB); // floating_matcher_table = Teddy-таблица
+    assert!(
+        TeddyTable::parse(&table).is_ok(),
+        "baseline: запиненная валидная Teddy-таблица должна разбираться"
+    );
+    let conf_offset = u32::from_le_bytes(table[16..20].try_into().unwrap()) as usize;
+    table[conf_offset..conf_offset + 4].copy_from_slice(&0x7FFF_FFF0u32.to_le_bytes());
+    assert!(
+        TeddyTable::parse(&table).is_err(),
+        "враждебный Teddy confirm-оффсет должен отклоняться на разборе (F-005)"
     );
 }
 
