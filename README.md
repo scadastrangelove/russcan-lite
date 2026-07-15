@@ -68,6 +68,73 @@ The full port is the source of truth; russcan-lite is a curated, dependency-lean
 subset. Changes flow full → lite by copy, which is precisely why the NFA stub
 keeps `russcan-rose` textually identical rather than forked.
 
+## Using it — embed the engine, feed it a database
+
+russcan-lite does **not** compile patterns. It *loads* a serialized database and
+scans. Two steps, and the split is the whole point: compilation is C, offline, at
+build time; scanning is Rust, on every request.
+
+**1 — Compile your patterns once, offline.** This is the only place C runs, and it
+runs at build time, not on traffic. Use the pinned upstream
+`vectorscan`/Hyperscan (`a1c107e`, 5.4.12) — the same `hs_compile_multi` +
+`hs_serialize_database` the diff-oracle uses, so the bytes load byte-for-byte:
+
+```c
+// build-db.c — link against the pinned vectorscan. Run once; ship the output.
+#include <hs/hs.h>
+const char *pats[] = { "union select", "/etc/passwd", "foo|bar|baz" };
+unsigned    ids[]  = { 101, 102, 103 };
+unsigned    flg[]  = { 0, 0, 0 };
+hs_database_t *db; hs_compile_error_t *e;
+hs_compile_multi(pats, flg, ids, 3, HS_MODE_BLOCK, NULL, &db, &e);
+char *bytes; size_t len;
+hs_serialize_database(db, &bytes, &len);   // → write `bytes` to patterns.db
+```
+
+**2 — Embed the engine.** Add the facade crate and load the serialized bytes:
+
+```toml
+[dependencies]
+russcan      = { git = "https://github.com/scadastrangelove/russcan-lite" }
+russcan-hwlm = { git = "https://github.com/scadastrangelove/russcan-lite" }
+```
+
+```rust
+use russcan::Database;
+use russcan_hwlm::ScanCtl;
+
+let blob = std::fs::read("patterns.db")?;   // the serialized DB from step 1
+let db = Database::load(&blob)?;            // parse + validate (CRC + bounds)
+
+db.scan_block(request_body, &mut |id: u32, to: u64| {
+    // id = your pattern id (101 / 102 / …); to = end offset (last byte + 1)
+    println!("rule {id} matched, ending at byte {to}");
+    ScanCtl::Continue                        // return Terminate to stop early
+})?;
+```
+
+That is the entire integration surface: `Database::load` + `scan_block` with a
+closure. No global state, no C runtime, no allocation on the scan path.
+
+### "…and feed it my own regexp?"
+
+Yes — with one honest limit. Your patterns go through the *full* Hyperscan
+compiler, so regex **syntax** is accepted; but russcan-lite only *runs* the
+patterns that reduce to **literals**. A regex is fine here exactly when it isn't
+really a regex.
+
+| pattern | compiles to | russcan-lite |
+|---|---|---|
+| `union select`, `/etc/passwd`, `content:` strings | literal (FDR/Teddy) | ✅ runs |
+| `foo\|bar\|baz`, fixed alternations | multi-literal | ✅ runs |
+| `a.*b`, `\d{3,}`, char classes, backrefs | NFA (LimEx/McClellan/Sheng) | ❌ rejected |
+
+A non-literal database is **rejected with a clean `Err`, never mis-scanned** — the
+NFA stub returns `Unsupported` rather than guessing. If your ruleset is
+literal-dominated (most WAF/IDS `content` signatures are), that's the whole job.
+If you need real automaton evaluation in-engine, that's the full russcan port, not
+this one.
+
 ## Correctness
 
 Byte-for-byte, or it doesn't count.
