@@ -8,6 +8,7 @@ members = [
     "crates/russcan-rose",
     "crates/russcan",
 ]
+exclude = ["crates/russcan/fuzz"]
 
 [workspace.package]
 version = "0.0.1"

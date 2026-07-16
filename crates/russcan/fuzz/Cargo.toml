@@ -1,0 +1,30 @@
+[package]
+name = "russcan-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+russcan = { path = ".." }
+russcan-hwlm = { path = "../../russcan-hwlm" }
+
+# fuzz/ is its own workspace so cargo-fuzz's nightly flags don't touch the parent.
+[workspace]
+
+[[bin]]
+name = "fuzz_load"
+path = "fuzz_targets/fuzz_load.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_scan"
+path = "fuzz_targets/fuzz_scan.rs"
+test = false
+doc = false
+bench = false
